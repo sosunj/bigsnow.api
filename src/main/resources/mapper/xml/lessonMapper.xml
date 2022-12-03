@@ -1,0 +1,1437 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="lesson">
+
+	<!-- resultMap 소문자 변경 -->
+	<resultMap type="org.apache.commons.collections4.map.CaseInsensitiveMap" id="lowerMap" />
+
+
+	<sql id="lessonWhere">
+		WHERE L.USE_YN = 'Y'
+         and  S.USE_YN = 'Y'
+
+		<choose>
+			<when test="prog_state_cd == '01'">
+				AND CONCAT(T.LES_DT, T.LES_TO_TM ) <![CDATA[ <  ]]> DATE_FORMAT(now()	, '%Y%m%d%H%i')
+			</when>
+			<when test="prog_state_cd == '02'">
+				AND CONCAT(T.LES_DT, T.LES_TO_TM ) <![CDATA[ >= ]]> DATE_FORMAT(now()	, '%Y%m%d%H%i')
+			</when>
+		</choose>
+
+		<if test='lec_year   != null and lec_year    != ""'> AND L.lec_year   = #{lec_year} </if>
+		<if test='teacher_no != null and teacher_no  != ""'> AND L.teacher_no = #{teacher_no} </if>
+		<if test='lec_no     != null and lec_no      != ""'> AND L.lec_no     = #{lec_no} </if>
+
+		<if test='lec_nm     != null and lec_nm      != ""'> AND S.SBJ_NM   like concat('%', #{lec_nm}, '%') </if>
+
+		<if test='cust_no != null and cust_no != ""'> AND C.cust_no = #{cust_no} </if>
+		<if test='cust_no == null or cust_no == ""'>
+			<if test="user_grp_cd == 'UGP006'"> AND ( C.cust_no = #{token_cust_no} || C.cust_no in (select cust_no from tb_cust where up_cust_no=#{token_cust_no})  )  </if>
+		</if>
+
+	</sql>
+
+
+	<select id="lessonList" parameterType="java.util.Map" resultMap="lowerMap">
+		/* lesson.lessonList */
+		select    T.LEC_NO
+				, T.LES_NO
+		        , T.LES_ROUND
+				, T.LES_DT
+				, SUBSTR( _UTF8'일월화수목금토', DAYOFWEEK(T.LES_DT), 1) AS WEEK_NM
+				, T.LES_FR_TM
+				, T.LES_TO_TM
+				, T.ATT_NUM
+				, T.ABSENT_NUM
+				, T.LES_DSC
+		        , T.REG_DT
+				, L.LEC_INWON
+				, round(ifnull(case when L.LEC_INWON = 0 then 0 else T.ATT_NUM / L.LEC_INWON * 100 end, 0), 0) as INWON_RATE
+
+				, CASE WHEN DATE_FORMAT(now()	, '%Y%m%d%H%i') BETWEEN CONCAT(T.LES_DT, T.LES_FR_TM ) AND CONCAT(T.LES_DT, T.LES_TO_TM ) THEN  '진행'
+				       WHEN CONCAT(T.LES_DT, T.LES_TO_TM )	<![CDATA[ <  ]]>  DATE_FORMAT(now()	, '%Y%m%d%H%i') THEN '종료'
+				       ELSE '진행전'
+				  END   AS ING_NM
+
+				, S.SBJ_NM as LEC_NM
+				, C.CUST_NM
+		        , U.user_nm as teacher_nm
+		from TB_LESSON T inner      join tb_lecture L on ( L.LEC_NO = T.LEC_NO )
+						 left outer join tb_subject S on ( L.SBJ_NO = S.SBJ_NO )
+						 left outer join tb_cust    C on ( C.cust_no = S.CUST_NO )
+		                 left outer join tb_user    U on ( L.TEACHER_NO = U.USER_NO )
+
+		<include refid="lessonWhere"/>
+
+		ORDER BY L.LEC_NO desc
+		<if test=' start_row != null '> limit  #{start_row}, #{end_row}  </if>
+
+	</select>
+
+
+	<select id="lessonCount" parameterType="java.util.Map" resultType="int">
+		/* lesson.lessonCount */
+
+		SELECT  count(*)
+		from TB_LESSON T inner      join tb_lecture L on ( L.LEC_NO = T.LEC_NO )
+						left outer join tb_subject S on ( L.SBJ_NO = S.SBJ_NO )
+						left outer join tb_cust    C on ( C.cust_no = S.CUST_NO )
+						left outer join tb_user    U on ( L.TEACHER_NO = U.USER_NO )
+
+		<include refid="lessonWhere"/>
+
+	</select>
+
+	<select id="lessonCount_OLD" parameterType="java.util.Map" resultType="int">
+		/* lesson.lessonCount */
+
+		SELECT  count(*)
+		from tb_lecture L left outer join tb_subject S on ( L.SBJ_NO = S.SBJ_NO )
+		left outer join tb_cust    C on ( S.cust_no = C.CUST_NO )
+		left outer join tb_user    U on ( L.TEACHER_NO = U.USER_NO )
+		<include refid="lessonWhere" />
+
+	</select>
+
+
+	<select id="lessonDetail" parameterType="java.util.Map" resultMap="lowerMap">
+
+		/* lesson.lessonDetail */
+
+				select   L.*
+			           , C.CUST_NM
+			           , CONCAT_WS( ','
+			                     , case when L.LEC_MON_YN = 'Y' then '월' end
+			                     , case when L.LEC_TUE_YN = 'Y' then '화' end
+			                     , case when L.LEC_WED_YN = 'Y' then '수' end
+			                     , case when L.LEC_THU_YN = 'Y' then '목' end
+			                     , case when L.LEC_FRI_YN = 'Y' then '금' end
+			                     , case when L.LEC_SAT_YN = 'Y' then '토' end
+			                     , case when L.LEC_SUN_YN = 'Y' then '일' end
+
+			             ) as LEC_WEEK_NM
+			           , U.USER_NM as TEACHER_NM
+					   , S.SBJ_NM
+			           , ( SELECT NM from TB_CODE SC where REPR_CD ='SGC' and SC.cd = S.SBJ_GRP_CD ) as SBJ_GRP_NM
+			           , ( SELECT NM from TB_CODE SC where REPR_CD ='CTC' and SC.cd = S.CLASS_TGT_CD ) as CLASS_TGT_NM
+			           , ( SELECT NM from TB_CODE SC where REPR_CD ='PSC' and SC.cd = S.PROG_STATE_CD ) as CLASS_STATE_NM
+			           , ( SELECT NM from TB_CODE SC where REPR_CD ='SCC' and SC.cd = S.SBJ_CLS_CD ) as SBJ_CLS_NM
+
+
+		               , ( SELECT phy_file_nm from tb_file SF where SF.REF_PK = 'TB_LECTURE' AND SF.REF_PK = L.LEC_NO ORDER BY SF.FILE_NO DESC LIMIT 0, 1) AS MAIN_IMG
+		               , L.LEC_INWON
+		               , ( SELECT count(1) from tb_lesson where LEC_NO = L.LEC_NO ) as LESSON_TOT_ROUND
+				from tb_lecture L left outer join tb_subject S on ( L.SBJ_NO = S.SBJ_NO )
+		                      left outer join tb_cust    C on ( S.cust_no = C.CUST_NO )
+		                      left outer join tb_user    U on ( L.TEACHER_NO = U.USER_NO )
+		        WHERE L.USE_YN = 'Y'
+		        and   S.USE_YN = 'Y'
+		        and   L.lec_no = #{lec_no}
+
+	</select>
+
+
+	<sql id="lessonDetailAndWhere">
+
+		<if test='les_no != null and les_no != ""'>
+			and T.LES_NO  = #{les_no}
+		</if>
+
+		<if test='prog_state_cd != null and prog_state_cd != ""'>
+			<choose>
+				<when test="prog_state_cd == '01'">
+					AND CONCAT(T.LES_DT, T.LES_TO_TM ) &gt;=  DATE_FORMAT(now()	, '%Y%m%d%H%i')
+					ORDER by T.LES_NO
+				</when>
+				<when test="prog_state_cd == '02'">
+					AND CONCAT(T.LES_DT, T.LES_TO_TM ) &lt;  DATE_FORMAT(now()	, '%Y%m%d%H%i')
+					ORDER by T.LES_NO desc
+				</when>
+			</choose>
+		</if>
+
+	</sql>
+
+	<select id="lessonDetailAndList" parameterType="java.util.Map" resultMap="lowerMap">
+		/* lesson.lessonDetailAndList */
+ 				select     T.LEC_NO
+                 , T.LES_NO
+                 , T.LES_DT
+                 , SUBSTR( _UTF8'일월화수목금토', DAYOFWEEK(T.LES_DT), 1) AS WEEK_NM
+                 , T.LES_FR_TM
+                 , T.LES_TO_TM
+                 , T.ATT_NUM
+                 , T.ABSENT_NUM
+		         , T.LES_DSC
+		         , L.LEC_INWON
+                 , T.LES_ROUND
+				 ,   round(ifnull(case when L.LEC_INWON = 0 then 0 else T.ATT_NUM / L.LEC_INWON * 100 end, 0), 0) as INWON_RATE
+
+			     , CASE WHEN DATE_FORMAT(now()	, '%Y%m%d%H%i') BETWEEN CONCAT(T.LES_DT, T.LES_FR_TM ) AND CONCAT(T.LES_DT, T.LES_TO_TM ) THEN  '진행중'
+		                WHEN CONCAT(T.LES_DT, T.LES_TO_TM )	<![CDATA[ <  ]]>  DATE_FORMAT(now()	, '%Y%m%d%H%i') THEN '종료'
+                        ELSE '진행전'
+                   END   AS ING_NM
+
+				from TB_LESSON T left outer join tb_lecture L on ( L.LEC_NO = T.LEC_NO )
+                                 left outer join tb_subject S on ( L.SBJ_NO = S.SBJ_NO )
+	            where T.LEC_NO = #{lec_no}
+
+		        <include refid="lessonDetailAndWhere"/>
+
+			<if test='prog_state_cd == null or prog_state_cd == ""'>
+				ORDER by T.LES_NO desc
+			</if>
+
+		    <if test=' start_row != null '> limit  #{start_row}, #{end_row}  </if>
+
+	</select>
+
+
+	<select id="lessonDetailAndCount" parameterType="java.util.Map" resultType="int">
+
+		/* lesson.lessonDetailAndCount */
+
+		    SELECT  count(*)
+			from TB_LESSON T left outer join tb_lecture L on ( L.LEC_NO = T.LEC_NO )
+                              left outer join tb_subject S on ( L.SBJ_NO = S.SBJ_NO )
+	        where T.LEC_NO = #{lec_no}
+
+	  	    <include refid="lessonDetailAndWhere"/>
+
+	</select>
+
+
+	<insert id="insertVideoData" parameterType="java.util.Map">
+		/* lesson.insertVideoData */
+
+		INSERT INTO TB_VIDEODATA
+			(
+			        TTL
+			      , VIDEO_URL
+			      , LES_NO
+				  , REG_DT
+		<if test='reg_user_no != null and reg_user_no != ""'> , REG_USER_NO    </if>
+		) VALUES (
+				    #{ttl}
+			      , #{video_url}
+			      , #{les_no}
+				, DATE_FORMAT(now()	, '%Y%m%d%H%i%s')
+		<if test='reg_user_no != null and reg_user_no != ""'> , #{reg_user_no}     </if>
+		)
+	</insert>
+
+
+	<update id="updateVideoData" parameterType="java.util.Map">
+
+	 	/* lesson.updateVideoData */
+
+		UPDATE TB_VIDEODATA
+		SET     TTL               = #{ttl}
+		      , VIDEO_URL         = #{video_url}
+        WHERE data_no = #{data_no}
+
+	 </update>
+
+
+	<update id="deleteAllVideoData" parameterType="java.util.Map">
+
+	 	/* lesson.deleteAllVideoData */
+
+		DELETE FROM  TB_VIDEODATA
+        WHERE LES_NO = #{les_no}
+
+	 </update>
+
+	<select id="lessonVideoData" parameterType="java.util.Map" resultMap="lowerMap">
+
+		/* lesson.lessonVideoData */
+
+		   select    *
+		   from TB_VIDEODATA
+           where LES_NO = #{les_no}
+           ORDER by DATA_NO desc
+
+      </select>
+
+	<select id="lessonVideoFile" parameterType="java.util.Map" resultMap="lowerMap">
+
+		/* lesson.lessonVideoFile */
+
+		   select    *
+		   from  TB_FILE
+           where REF_NM ='TB_VIDEODATA'
+           AND   REF_PK = #{les_no}
+           ORDER by FILE_NO
+
+      </select>
+
+
+	<select id="lessonAttendDetail" parameterType="java.util.Map" resultMap="lowerMap">
+
+		/* lesson.lessonAttendDetail */
+
+		select       T.LEC_NO
+					, T.LES_NO
+					, T.LES_DT
+					, SUBSTR( _UTF8'일월화수목금토', DAYOFWEEK(T.LES_DT), 1) AS WEEK_NM
+					, T.LES_FR_TM
+					, T.LES_TO_TM
+					, T.ATT_NUM
+					, T.ABSENT_NUM
+					, T.LES_DSC
+					, L.LEC_INWON
+
+					,   round(ifnull(avg(case when L.LEC_INWON = 0 then 0 else T.ATT_NUM / L.LEC_INWON * 100 end), 0), 0) as INWON_RATE
+
+					, CASE WHEN DATE_FORMAT(now()	, '%Y%m%d%H%i') BETWEEN CONCAT(T.LES_DT, T.LES_FR_TM ) AND CONCAT(T.LES_DT, T.LES_TO_TM ) THEN  '진행중'
+					       WHEN CONCAT(T.LES_DT, T.LES_TO_TM ) <![CDATA[ <  ]]>DATE_FORMAT(now()	, '%Y%m%d%H%i') THEN '종료'
+					       ELSE '진행전'
+					  END   AS ING_NM
+
+					, S.SBJ_NM as LEC_NM
+					, L.LEC_YEAR
+					, L.LEC_DEGREE
+
+		from TB_LESSON T left outer join tb_lecture L on ( L.LEC_NO = T.LEC_NO )
+		left outer join tb_subject S on ( L.SBJ_NO = S.SBJ_NO )
+	 	where T.LES_NO =  #{les_no}
+
+
+      </select>
+
+
+
+	<select id="lessonAttendUserList" parameterType="java.util.Map" resultMap="lowerMap">
+
+		/* lesson.lessonAttendUserList */
+		select     L.LES_NO
+				,  P.LEC_APP_NO
+				,  A.ATT_NO
+				,  A.ATT_TM
+		        ,  A.FEED_BACK
+				,  ifnull(A.ATT_YN, 'N' ) as ATT_YN
+				, U.USER_NM
+				, U.GENDER_GBN
+				, date_format(now(), '%Y') - substring(U.BRITHDAY, 1, 4) as age
+		from tb_lesson L left outer join tb_lectureapp P on ( L.LEC_NO = P.LEC_NO )
+						 left outer join tb_attendance A on ( L.LES_NO = A.LES_NO and P.LEC_APP_NO = A.LEC_APP_NO )
+						 left outer join tb_user       U on ( P.STD_USER_NO = U.USER_NO  )
+		where L.LES_NO = #{les_no}
+		and   P.use_yn = 'Y'
+		order by A.ATT_YN desc, U.USER_NM
+
+
+	</select>
+
+
+
+	<select id="lessonAttendUserList_OLD" parameterType="java.util.Map" resultMap="lowerMap">
+
+		/* lesson.lessonAttendUserList_OLD */
+		select    A.*
+		, U.USER_NM
+		, U.GENDER_GBN
+		, date_format(now(), '%Y') - substring(U.BRITHDAY, 1, 4) as age
+
+		from tb_attendance A left outer join tb_lectureapp P on ( A.LEC_APP_NO  = P.LEC_APP_NO )
+		inner join tb_user       U on ( P.STD_USER_NO = U.USER_NO  )
+		where LES_NO = #{les_no}
+		order by A.ATT_YN desc, U.USER_NM
+
+
+	</select>
+
+
+	<select id="lectureappUserList" parameterType="java.util.Map" resultMap="lowerMap">
+
+		/* lesson.lectureappUserList */
+
+           select   A.STD_USER_NO
+                  , U.USER_NM
+           from tb_lectureapp A left outer join tb_user U on (A.STD_USER_NO = U.USER_NO )
+           WHERE A.LEC_NO =#{lec_no}
+           AND   A.use_yn = 'Y'
+           ORDER BY U.USER_NM
+
+
+      </select>
+
+
+	<select id="lessonAttendDateList" parameterType="java.util.Map" resultMap="lowerMap">
+		/* lesson.lessonAttendDateList */
+
+			    select   A.LES_DT
+		<foreach collection="arr_user_no" item="item_user_no" index="nLoop">
+			, max(case when STD_USER_NO = #{item_user_no} and ATT_CNT
+			<![CDATA[ >  ]]>
+			0 then 'Y' else 'N' end    ) as USER_ATT_${nLoop}
+			          , max(case when STD_USER_NO = #{item_user_no} then USER_NM else '-' end) as USER_NM_${nLoop}
+		</foreach>
+		, COUNT(*) TOT_INWON
+			          , COUNT(CASE WHEN ATT_CNT
+		<![CDATA[ >  ]]>
+		0 THEN 1 END) AS ATT_INWON
+			          , COUNT(*) - COUNT(CASE WHEN ABSENT_CNT
+		<![CDATA[ >  ]]>
+		0 THEN 1 END) AS ABSENT_INWON
+			    from (
+			              SELECT   A.STD_USER_NO
+			                     , A.LES_DT
+			                     , A.USER_NM
+			                     , B.LES_NO
+			                     , B.LEC_APP_NO
+			                     , B.ATT_CNT
+			                     , B.ABSENT_CNT
+			              FROM (
+			                       SELECT A.*, B.*
+			                       FROM (
+			                              select   A.STD_USER_NO
+			                                     , U.USER_NM
+			                              from tb_lectureapp A left outer join tb_user U on (A.STD_USER_NO = U.USER_NO )
+			                              WHERE A.LEC_NO = #{lec_no}
+			                              AND   A.use_yn = 'Y'
+			                            ) A ,
+			                            (
+			                                select L.LES_NO, L.LES_DT
+			                                from TB_LESSON L
+			                                WHERE L.LEC_NO = #{lec_no}
+			                            ) B
+			                  ) A left outer join  (
+			                                                select L.LES_NO, L.LES_DT, A.LEC_APP_NO, T.STD_USER_NO
+
+		                                                            , sum( case when A.ATT_YN = 'Y' then 1 else 0 end  )  as ATT_CNT
+		                                                            , sum( case when A.ATT_YN = 'N' then 1 else 0 end  )  as ABSENT_CNT
+
+			                                                from TB_LESSON L left outer join tb_attendance A on (L.LES_NO = A.LES_NO )
+			                                                                  left outer join tb_lectureapp T on (A.LEC_APP_NO = T.LEC_APP_NO )
+			                                                where L.LEC_NO = #{lec_no}
+			                                                AND   T.use_yn = 'Y'
+			                                                group by L.LES_NO, L.LES_DT, A.LEC_APP_NO, T.STD_USER_NO
+			                                            ) B on (A.STD_USER_NO = B.STD_USER_NO and A.LES_DT = B.LES_DT )
+			      ) A
+			group by  A.LES_DT
+			order by A.LES_DT asc
+	</select>
+
+
+	<select id="lessonAttendDateUserList" parameterType="java.util.Map" resultMap="lowerMap">
+		/* lesson.lessonAttendDateUserList */
+			select c.USER_ID ,c.USER_NM ,c.USER_GRP_CD ,c.GENDER_GBN ,b.ATT_YN
+			from tb_lectureapp a left outer join tb_attendance b on a.LEC_APP_NO = b.LEC_APP_NO
+								 inner join tb_user c on a.STD_USER_NO = c.USER_NO
+								 inner join tb_lecture d on a.LEC_NO = d.LEC_NO
+								 inner join tb_lesson e on e.LEC_NO = d.LEC_NO
+			where e.LES_NO =  #{les_no}
+			order by c.USER_NM
+    </select>
+
+
+	<sql id="lessonStudentWhere">
+		WHERE A.USE_YN = 'Y'
+		<if test='lec_nm  != null and lec_nm  != ""'> AND S.SBJ_NM  like concat('%', #{lec_nm} , '%' ) </if>
+
+		<if test='sbj_nm  != null and sbj_nm  != ""'> AND S.SBJ_NM  like concat('%', #{sbj_nm} , '%' ) </if>
+
+		<if test='cust_nm != null and cust_nm != ""'> AND C.cust_nm like concat('%', #{cust_nm} , '%' ) </if>
+		<if test='cust_no != null and cust_no != ""'> AND C.cust_no = #{cust_no} </if>
+		<if test='cust_no == null or cust_no == ""'>
+			<if test="user_grp_cd == 'UGP006'"> AND ( C.cust_no = #{token_cust_no} || C.cust_no in (select cust_no from tb_cust where up_cust_no=#{token_cust_no})  )  </if>
+		</if>
+		<if test='lec_year != null and lec_year != ""'> AND L.lec_year = #{lec_year} </if>
+		<if test='std_user_nm != null and std_user_nm != ""'> AND U.user_nm like concat('%', #{std_user_nm}, '%') </if>
+
+
+		<if test='lec_no != null and lec_no != ""'> AND A.LEC_NO = #{lec_no} </if>
+
+		<if test='teacher_no != null and teacher_no != ""'> AND L.teacher_no = #{teacher_no} </if>
+
+	</sql>
+
+
+	<select id="lessonStudentList" parameterType="java.util.Map" resultMap="lowerMap">
+		/* lesson.lessonStudentList */
+
+		select    C.CUST_NM
+				, S.SBJ_NM as LEC_NM
+				, U.USER_NM as STD_USER_NM
+				, A.ATT_NUM
+				, A.ABSENT_NUM
+				, round(ifnull(case when L.LEC_INWON = 0 then 0 else A.ATT_NUM / L.PROG_ROUND * 100 end, 0), 0) as INWON_RATE
+				, L.TOT_ROUND
+				, T.USER_NM as TARCHAR_NM
+				, A.REG_DT
+				, A.FEEDBACK_NUM
+				, A.LEC_APP_NO
+				, A.LEC_NO
+				, U.USER_NO
+				, U.HP_NO
+				, U.USER_ID
+				, U.GENDER_GBN
+
+				, CASE WHEN DATE_FORMAT(now()	, '%Y%m%d%H%i') BETWEEN CONCAT(L.LEC_FR_DT, L.LEC_FR_TM ) AND CONCAT(L.LEC_TO_DT, L.LEC_TO_TM ) THEN  '진행'
+					   WHEN CONCAT(L.LEC_TO_DT, L.LEC_TO_TM ) <![CDATA[ <  ]]>  DATE_FORMAT(now()	, '%Y%m%d%H%i') THEN '종료'
+					   ELSE '진행전'
+				  END   AS ING_NM
+
+				, date_format(now(), '%Y') - substring(U.BRITHDAY, 1, 4) as age
+				, L.PROG_ROUND
+			from tb_lectureapp A left outer join tb_user    U on ( A.STD_USER_NO = U.USER_NO )
+			                     left outer join tb_lecture L on ( A.LEC_NO      = L.LEC_NO )
+			                     left outer join tb_user    T on ( L.TEACHER_NO  = T.USER_NO )
+			                     left outer join tb_subject S on ( L.SBJ_NO      = S.SBJ_NO )
+			                     left outer join tb_cust    C on ( S.CUST_NO     = C.CUST_NO )
+		<include refid="lessonStudentWhere" />
+		ORDER BY A.LEC_APP_NO desc
+
+		<if test=' start_row != null '> limit  #{start_row}, #{end_row}  </if>
+
+
+	</select>
+
+
+	<select id="lessonStudentCount" parameterType="java.util.Map" resultType="int">
+		/* lesson.lessonStudentCount */
+
+		    SELECT  count(*)
+			from tb_lectureapp A left outer join tb_user    U on ( A.STD_USER_NO = U.USER_NO )
+			                     left outer join tb_lecture L on ( A.LEC_NO      = L.LEC_NO )
+			                     left outer join tb_user    T on ( L.TEACHER_NO  = T.USER_NO )
+			                     left outer join tb_subject S on ( L.SBJ_NO      = S.SBJ_NO )
+			                     left outer join tb_cust    C on ( S.CUST_NO     = C.CUST_NO )
+		<include refid="lessonStudentWhere" />
+
+	</select>
+
+
+	<select id="lessonStudentFeedbackList" parameterType="java.util.Map" resultMap="lowerMap">
+
+           /* lesson.lessonStudentFeedbackList */
+
+			select  F.*
+			from tb_feedback F
+			where LEC_APP_NO = #{lec_app_no}
+		    ORDER BY F.FB_NO desc
+
+     </select>
+
+
+	<insert id="insertFeedback" parameterType="java.util.Map">
+		/* lession.insertFeedback */
+
+		INSERT INTO tb_feedback
+			(
+			        LEC_APP_NO
+			      , CTNT
+				  , REG_DT
+		<if test='reg_user_no != null and reg_user_no != ""'> , REG_USER_NO    </if>
+		) VALUES (
+				    #{lec_app_no}
+			      , #{ctnt}
+				, DATE_FORMAT(now()	, '%Y%m%d%H%i%s')
+		<if test='reg_user_no != null and reg_user_no != ""'> , #{reg_user_no}     </if>
+		)
+	</insert>
+
+
+	<delete id="deleteFeedback" parameterType="java.util.Map">
+
+	 	/* lesson.deleteFeedback */
+
+		 DELETE FROM tb_feedback
+		 WHERE  FB_NO = #{fb_no}
+
+	 </delete>
+
+
+	<delete id="updateFeedbackCount" parameterType="java.util.Map">
+
+	 	/* lesson.updateFeedbackCount */
+
+		 update TB_LECTUREAPP
+		 set    FEEDBACK_NUM = ( select count(*) from tb_feedback where  lec_app_no = #{lec_app_no} )
+		 WHERE  lec_app_no = #{lec_app_no}
+
+	 </delete>
+
+
+	<select id="lessonStudentDupChk" parameterType="java.util.Map" resultMap="lowerMap">
+
+           /* lesson.lessonStudentDupChk */
+
+			select A.*
+			from tb_lectureapp A
+
+			WHERE STD_USER_NO = #{std_user_no}
+			AND   LEC_NO      = #{lec_no}
+			AND   USE_YN      = 'Y'
+
+     </select>
+
+	<insert id="insertLectureapp" parameterType="java.util.Map">
+		/* lesson.insertLectureapp */
+
+		INSERT INTO TB_LECTUREAPP
+			(
+				  STD_USER_NO
+				, LEC_NO
+				, FEEDBACK_NUM
+				, USE_YN
+				, REG_DT
+		<if test='reg_user_no != null and reg_user_no != ""'> , REG_USER_NO    </if>
+		) VALUES (
+				    #{std_user_no}
+			      , #{lec_no}
+			      , 0
+			      ,'Y'
+				  , DATE_FORMAT(now()	, '%Y%m%d%H%i%s')
+		<if test='reg_user_no != null and reg_user_no != ""'> , #{reg_user_no}     </if>
+		)
+	</insert>
+
+
+	<select id="lessonLectureAppDetail" parameterType="java.util.Map" resultMap="lowerMap">
+
+           /* lesson.lessonLectureAppDetail */
+			select A.*
+			      , S.SBJ_NM as LEC_NM
+			      , L.*
+			      , U.USER_NM
+		          , U.GENDER_GBN
+		          , T.USER_NM  as TEACHER_NM
+			      , CONCAT_WS( ','
+			                     , case when L.LEC_MON_YN = 'Y' then '월' end
+			                     , case when L.LEC_TUE_YN = 'Y' then '화' end
+			                     , case when L.LEC_WED_YN = 'Y' then '수' end
+			                     , case when L.LEC_THU_YN = 'Y' then '목' end
+			                     , case when L.LEC_FRI_YN = 'Y' then '금' end
+			                     , case when L.LEC_SAT_YN = 'Y' then '토' end
+			                     , case when L.LEC_SUN_YN = 'Y' then '일' end
+
+			             ) as LEC_WEEK_NM
+
+		, CASE  WHEN DATE_FORMAT(now()	, '%Y%m%d%H%i') BETWEEN CONCAT(L.LEC_FR_DT, L.LEC_FR_TM ) AND CONCAT(L.LEC_TO_DT, L.LEC_TO_TM ) THEN  '진행'
+				WHEN CONCAT(L.LEC_FR_DT, L.LEC_TO_TM ) <![CDATA[ <  ]]>   DATE_FORMAT(now()	, '%Y%m%d%H%i') THEN '종료'
+				ELSE '진행전'
+			END   AS ING_NM
+
+		from   tb_lectureapp A left outer join tb_lecture L on (A.LEC_NO = L.LEC_NO )
+			                       left outer join tb_user    U on (A.STD_USER_NO = U.USER_NO )
+			                       left outer join TB_SUBJECT S on ( L.SBJ_NO = S.SBJ_NO )
+		                           left outer join tb_user    T on (L.TEACHER_NO = T.USER_NO )
+			where lec_app_no  = #{lec_app_no}
+			and   A.use_yn = 'Y'
+
+     </select>
+
+	<select id="lessonAttendanceDetailList" parameterType="java.util.Map" resultMap="lowerMap">
+        /* lesson.lessonAttendanceDetailList */
+		select    L.LES_DT
+				, L.LES_FR_TM
+				, L.LES_TO_TM
+		        , L.LES_ROUND
+				, ifnull(A.ATT_YN, 'N') as ATT_YN
+				, L.LES_DSC
+				, SUBSTR( _UTF8'일월화수목금토', DAYOFWEEK(L.LES_DT), 1) AS WEEK_NM
+				, L.ATT_NUM
+				, L.ABSENT_NUM
+				, A.REG_DT
+				, CASE WHEN DATE_FORMAT(now()	, '%Y%m%d%H%i') BETWEEN CONCAT(L.LES_DT, L.LES_FR_TM ) AND CONCAT(L.LES_DT, L.LES_TO_TM ) THEN  '진행'
+				       WHEN CONCAT(L.LES_DT, L.LES_TO_TM ) <![CDATA[ <  ]]>  DATE_FORMAT(now()	, '%Y%m%d%H%i') THEN '종료'
+				       ELSE '진행전'
+				  END   AS ING_NM
+
+		from TB_LESSON L left outer join TB_ATTENDANCE A on ( A.LES_NO = L.LES_NO and  lec_app_no  = #{lec_app_no} )
+		  where lec_no  = #{lec_no}
+		  and   L.LES_DT <![CDATA[ <=  ]]> date_format(now(), '%Y%m%d')
+		  ORDER BY L.LES_DT desc
+
+		<if test=' start_row != null '> limit  #{start_row}, #{end_row}  </if>
+
+     </select>
+
+
+
+	<select id="lessonAttendanceDetailCount" parameterType="java.util.Map" resultType="int">
+		/* lesson.lessonAttendanceDetailCount */
+		select   count(*)
+		from TB_LESSON L left outer join TB_ATTENDANCE A on ( A.LES_NO = L.LES_NO and  lec_app_no  = #{lec_app_no} )
+		where lec_no  = #{lec_no}
+		and   L.LES_DT <![CDATA[ <=  ]]> date_format(now(), '%Y%m%d')
+
+
+	</select>
+
+
+	<select id="userAttendanceExistCount" parameterType="java.util.Map" resultType="int">
+
+           /* lesson.userAttendanceExistCount */
+
+			select  count(*)
+			from  TB_ATTENDANCE A
+			where  lec_app_no = #{lec_app_no}
+			and    lec_no     = #{lec_no}
+
+     </select>
+
+
+	<insert id="insertAttendance" parameterType="java.util.Map">
+		/* lesson.insertAttendance */
+
+			INSERT INTO TB_ATTENDANCE
+			(
+			     LEC_APP_NO
+			   , LES_NO
+			   , ATT_YN
+			   , ATT_TM
+			   , IP_ADDR
+			   , REG_DT
+		       , FEED_BACK
+
+		       <if test='token_user_no != null and token_user_no != ""'>  , REG_USER_NO  </if>
+
+		) values (
+
+				    #{lec_app_no}
+			      , #{les_no}
+			      , #{att_yn}
+			      , DATE_FORMAT(now()	, '%H%i%s')
+			      , #{ip_addr}
+				  , DATE_FORMAT(now()	, '%Y%m%d%H%i%s')
+
+		          , #{feed_back}
+
+		       <if test='token_user_no != null and token_user_no != ""'> , #{token_user_no}     </if>
+		)
+	</insert>
+
+
+	<update id="updateAttendanceAttYn" parameterType="java.util.Map">
+		/* lesson.updateAttendanceAttYn */
+
+		UPDATE TB_ATTENDANCE
+		SET    ATT_YN     = #{att_yn}
+		     , FEED_BACK  = #{feed_back}
+		WHERE ATT_NO = #{att_no}
+
+	</update>
+
+	<update id="updateLessonDscUpdate" parameterType="java.util.Map">
+		/* lesson.updateLessonDscUpdate */
+
+		UPDATE TB_LESSON
+		SET   les_dsc = #{les_dsc}
+		WHERE les_no  = #{les_no}
+
+	</update>
+
+
+
+	<insert id="insertAttendanceBatch" parameterType="java.util.Map">
+
+	 	/* lesson.insertAttendanceBatch */
+
+			INSERT INTO TB_ATTENDANCE
+			(
+			     LEC_APP_NO
+			   , LES_NO
+			   , ATT_YN
+			   , REG_DT
+
+			) values (
+
+				    #{lec_app_no}
+			      , #{les_no}
+			      , #{att_yn}
+				  , DATE_FORMAT(now()	, '%Y%m%d%H%i%s')
+
+			)
+
+	  </insert>
+
+
+	<update id="updateLectureAppAtt" parameterType="java.util.Map">
+
+	 	/* lesson.updateLectureAppAtt */
+
+			UPDATE TB_LECTUREAPP
+			SET   ATT_NUM    = ( SELECT COUNT(*) FROM TB_ATTENDANCE WHERE LEC_APP_NO = #{lec_app_no} AND ATT_YN = 'Y' )
+			    , ABSENT_NUM = ( SELECT COUNT(*) FROM TB_ATTENDANCE WHERE LEC_APP_NO = #{lec_app_no} AND  ifnull(ATT_YN, 'N') = 'N' )
+			WHERE   LEC_APP_NO = #{lec_app_no}
+
+	  </update>
+
+	<update id="updateLessonAtt" parameterType="java.util.Map">
+
+		/* lesson.updateLessonAtt */
+
+		UPDATE TB_LESSON
+		SET   ATT_NUM    = ( SELECT COUNT(*) FROM TB_ATTENDANCE WHERE les_no = #{les_no} AND ATT_YN = 'Y' )
+		    , ABSENT_NUM = ( SELECT COUNT(*) FROM TB_ATTENDANCE WHERE les_no = #{les_no} AND ifnull(ATT_YN, 'N') = 'N' )
+		WHERE   les_no = #{les_no}
+
+	</update>
+
+
+	<select id="lectureAppListBatch" parameterType="java.util.Map" resultMap="lowerMap">
+		/* lesson.lectureAppListBatch */
+
+			select    A.LEC_APP_NO
+		            , N.LES_NO
+		            , N.LES_TO_TM
+		            , N.LES_DT
+			from   tb_lectureapp A
+                  ,tb_lecture L
+			      ,TB_LESSON N
+			where  A.LEC_NO = L.LEC_NO
+		    and    A.LEC_NO = N.LEC_NO
+		    and    A.USE_YN = 'Y'
+			and    L.USE_YN = 'Y'
+			and    L.PROG_STATE_CD = 'PSC001'
+			and    N.LES_DT        =  date_format(now(), '%Y%m%d')
+			and    N.LES_TO_TM 	<![CDATA[ <=  ]]>date_format(now(), '%H%i')
+			and    not exists (
+			                     select 'X'
+			                     from  TB_ATTENDANCE ST
+			                     where ST.LEC_APP_NO = A.LEC_APP_NO
+			                     and   ST.LES_NO     = N.LES_NO
+			                  )
+	</select>
+
+
+	<insert id="insertLessionBatch" parameterType="java.util.Map">
+	 	/* lesson.insertLessionBatch */
+			INSERT INTO TB_LESSON
+			(
+			     LES_ROUND
+			   , LEC_NO
+			   , LES_DT
+			   , LES_FR_TM
+			   , LES_TO_TM
+			   , TEACHER_NO
+			   , ATT_NUM
+			   , ABSENT_NUM
+			   , ROOM_ID
+			   , REG_DT
+			)
+			select  ( SELECT IFNULL(MAX(LES_ROUND), 0) + 1
+			           FROM TB_LESSON N
+			           WHERE N.LEC_NO = T.LEC_NO
+			         ) AS LES_ROUND
+			       ,T.LEC_NO
+			       , date_format(now(), '%Y%m%d') AS LES_DT
+			       ,T.LEC_FR_TM
+			       ,T.LEC_TO_TM
+			       ,T.TEACHER_NO
+			       , 0
+			       , 0
+			       , UPPER(REPLACE(UUID(),'-',''))
+			       , date_format(now(), '%Y%m%d%H%i%s')
+			from TB_LECTURE T
+			where PROG_STATE_CD = 'PSC001'
+			AND   T.USE_YN ='Y'
+			and  date_format(now(), '%Y%m%d') between LEC_FR_DT and LEC_TO_DT
+			and  (
+			          case when weekday(now()) = 0 and LEC_MON_YN = 'Y' then 'Y' end  = 'Y'
+			       or case when weekday(now()) = 1 and LEC_TUE_YN = 'Y' then 'Y' end  = 'Y'
+			       or case when weekday(now()) = 2 and LEC_WED_YN = 'Y' then 'Y' end  = 'Y'
+			       or case when weekday(now()) = 3 and LEC_THU_YN = 'Y' then 'Y' end  = 'Y'
+			       or case when weekday(now()) = 4 and LEC_FRI_YN = 'Y' then 'Y' end  = 'Y'
+			       or case when weekday(now()) = 5 and LEC_SAT_YN = 'Y' then 'Y' end  = 'Y'
+			       or case when weekday(now()) = 6 and LEC_SUN_YN = 'Y' then 'Y' end  = 'Y'
+			     )
+			AND NOT EXISTS (
+			                   SELECT 'X'
+			                   FROM TB_LESSON L
+			                   WHERE L.LEC_NO = T.LEC_NO
+			                   AND   L.LES_DT = date_format(now(), '%Y%m%d')
+			               )
+
+	</insert>
+
+	<update id="updateLectureRoundBatch" parameterType="java.util.Map">
+
+	 	/* lesson.updateLectureRoundBatch */
+
+			UPDATE TB_LECTURE
+			SET   PROG_ROUND = ( SELECT MAX(LES_ROUND)
+			                     FROM TB_LESSON L
+			                     WHERE L.LEC_NO = TB_LECTURE.LEC_NO
+			                   )
+				, TOT_ROUND  = ( SELECT count(LES_ROUND)
+							 	 FROM TB_LESSON L
+								 WHERE L.LEC_NO = TB_LECTURE.LEC_NO
+								)
+			WHERE LEC_NO  IN (
+			                    select A.LEC_NO
+			                    from   TB_LESSON A
+			                    where  A.LES_DT <![CDATA[ >=  ]]> date_format(now(), '%Y%m%d')
+			                 )
+
+     </update>
+
+
+	<select id="mainTodayLessonList" parameterType="java.util.Map" resultMap="lowerMap">
+		/* lesson.mainTodayLessonList */
+
+                  select    L.LEC_NO
+                        , ( SELECT NM from TB_CODE SC where REPR_CD ='SGC' and SC.cd = S.SBJ_GRP_CD ) as SBJ_GRP_NM
+                        , S.SBJ_NM as LEC_NM
+                        , T.LES_DT
+                        , T.LES_FR_TM
+                        , T.LES_TO_TM
+                        , L.CAPA_NUM
+                        , T.ATT_NUM
+      			           , CASE WHEN DATE_FORMAT(now()	, '%Y%m%d%H%i') BETWEEN CONCAT(T.LES_DT, T.LES_FR_TM ) AND CONCAT(T.LES_DT, T.LES_TO_TM ) THEN  '진행'
+                              WHEN CONCAT(T.LES_DT, T.LES_TO_TM ) <![CDATA[ <  ]]> DATE_FORMAT(now()	, '%Y%m%d%H%i') THEN '종료'
+                              ELSE '진행전'
+                         END   AS ING_NM
+
+                       , cast( case when ifnull(L.TOT_ROUND, 0) = 0 then 0 else ifnull(T.LES_ROUND, 0) * 100 / ifnull(L.TOT_ROUND, 0) end as unsigned ) ing_rate
+
+              from tb_lecture L left outer join tb_subject S on ( L.SBJ_NO  = S.SBJ_NO )
+                                left outer join tb_cust    C on ( S.cust_no = C.CUST_NO )
+                                left outer join tb_lesson  T on ( L.LEC_NO  = T.LEC_NO )
+                where L.USE_YN = 'Y'
+                AND   S.USE_YN = 'Y'
+                and   T.LES_DT = DATE_FORMAT(now()	, '%Y%m%d')
+		<choose>
+			<when test="user_grp_cd == 'UGP006'">  AND ( S.cust_no = #{cust_no} || S.cust_no in (select cust_no from tb_cust where up_cust_no=#{cust_no})  ) </when>
+		</choose>
+		ORDER BY lec_no desc
+                limit 0, 5
+	</select>
+
+
+	<select id="mainTodayLessonStat" parameterType="java.util.Map" resultMap="lowerMap">
+		/* lesson.mainTodayLessonStat */
+
+			     select   SBJ_GRP_NM
+			            , SBJ_CLS_NM
+			            , count( distinct SBJ_NO ) as sbj_cnt
+			            , sum(LEC_INWON) as LEC_INWON
+			            , sum(ing_rate) / count(*) as ing_rate
+			            , sum(att_rate) / count(*) as att_rate
+			     from (
+			                select    L.LEC_NO
+			                        , ( SELECT NM from TB_CODE SC where REPR_CD ='SGC' and SC.cd = S.SBJ_GRP_CD ) as SBJ_GRP_NM
+			                        , ( SELECT NM from TB_CODE SC where REPR_CD ='SCC' and SC.cd = S.SBJ_CLS_CD ) as SBJ_CLS_NM
+			                        , S.SBJ_NO
+			                        , T.ATT_NUM / T.ABSENT_NUM
+			      			            , L.LEC_INWON
+			                       , case when ifnull(L.TOT_ROUND, 0) = 0 then 0 else ifnull(T.LES_ROUND, 0) * 100 / ifnull(L.TOT_ROUND, 0) end ing_rate
+
+			                       , case when ( ifnull(T.ATT_NUM, 0) + ifnull(T.ABSENT_NUM, 0)) = 0 then 0
+			                              else ifnull(T.ATT_NUM, 0) * 100 / ( ifnull(T.ATT_NUM, 0) + ifnull(T.ABSENT_NUM, 0) )
+			                         end att_rate
+
+			                from tb_lecture L left outer join tb_subject S on ( L.SBJ_NO  = S.SBJ_NO )
+			                                  left outer join tb_cust    C on ( S.cust_no = C.CUST_NO )
+			                                  left outer join tb_lesson  T on ( L.LEC_NO  = T.LEC_NO )
+			                where L.USE_YN = 'Y'
+			                AND   S.USE_YN = 'Y'
+			                and   T.LES_DT = DATE_FORMAT(now()	, '%Y%m%d')
+		<choose>
+			<when test="user_grp_cd == 'UGP006'">  AND ( S.cust_no = #{cust_no} || S.cust_no in (select cust_no from tb_cust where up_cust_no=#{cust_no})  ) </when>
+		</choose>
+		) A
+
+			           group by LEC_NO, SBJ_GRP_NM, SBJ_CLS_NM
+			           order by SBJ_GRP_NM, SBJ_CLS_NM
+			           limit 0, 5
+	</select>
+
+
+	<select id="myLessionVideoList" parameterType="java.util.Map" resultMap="lowerMap">
+		/* lesson.myLessionVideoList */
+
+			select   S.SBJ_NM as LEC_NM
+					 , U.USER_NM as TEACHER_NM
+					 , N.LES_NO
+					 , N.LES_DT
+					 , N.LES_FR_TM
+					 , N.LES_TO_TM
+					 , N.TEACHER_NO
+					 , N.LES_ROUND
+					 , N.ROOM_ID
+					 , L.LEC_NO
+					 , L.LEC_FR_DT
+					 , L.LEC_TO_DT
+					 , L.LEC_FR_TM
+					 , L.LEC_TO_TM
+					 , L.LEC_DSC
+					 , L.LEC_INWON
+					 , L.CAPA_NUM
+					, ( select phy_file_nm from TB_FILE F where F.REF_NM ='TB_SUBJECT' AND  F.REF_PK = S.SBJ_NO AND F.FILE_GBN = 'main_img'  ORDER BY F.FILE_NO DESC LIMIT 0, 1 ) AS MAIN_IMG
+					, ( SELECT VIDEO_URL from tb_videodata VD where VD.LES_NO = N.LES_NO ORDER BY VD.DATA_NO DESC LIMIT 0, 1) AS VIDEO_URL
+			from  tb_lecture L inner join TB_LESSON N on ( L.LEC_NO = N.LEC_NO )
+								inner join tb_user    U on ( N.TEACHER_NO = U.USER_NO )
+								left outer join TB_SUBJECT S on ( L.SBJ_NO = S.SBJ_NO )
+			where  L.USE_YN = 'Y'
+			and    L.PROG_STATE_CD = 'PSC001'
+			and   ( N.LES_DT  <![CDATA[ <=  ]]>  date_format(now(), '%Y%m%d')
+			        or N.LES_DT= (select max(LES_DT)  from TB_LESSON where lec_no=L.LEC_NO and N.LES_DT <![CDATA[ > ]]> date_format(now(), '%Y%m%d') ) )
+		<choose>
+			<when test="user_grp_cd == 'UGP002'"> and    N.TEACHER_NO = #{teacher_no} </when>
+			<when test="user_grp_cd == 'UGP001'">  and    N.LEC_NO in (SELECT LEC_NO FROM  tb_lectureapp WHERE USE_YN = 'Y' AND STD_USER_NO = #{std_user_no}) </when>
+			<when test="user_grp_cd == 'UGP006'">  AND ( S.cust_no = #{cust_no} || S.cust_no in (select cust_no from tb_cust where up_cust_no=#{cust_no})  )  </when>
+		</choose>
+		<if test='lec_no != null and lec_no != ""'> AND L.LEC_NO = #{lec_no}  </if>
+		ORDER BY N.LES_DT, N.LES_FR_TM
+		<if test=' start_row != null '> limit  #{start_row}, #{end_row}  </if>
+	</select>
+
+	<select id="myLessionVideoCount" parameterType="java.util.Map" resultType="int">
+		SELECT  count(*)
+		from  tb_lecture L inner join TB_LESSON N on ( L.LEC_NO = N.LEC_NO )
+		inner join tb_user    U on ( N.TEACHER_NO = U.USER_NO )
+		left outer join TB_SUBJECT S on ( L.SBJ_NO = S.SBJ_NO )
+		where  L.USE_YN = 'Y'
+		and    L.PROG_STATE_CD = 'PSC001'
+		and   ( N.LES_DT &lt;= date_format(now(), '%Y%m%d')
+		or N.LES_DT= (select max(LES_DT)  from TB_LESSON where lec_no=L.LEC_NO and N.LES_DT &gt; date_format(now(), '%Y%m%d') ) )
+		<choose>
+			<when test="user_grp_cd == 'UGP002'"> and    N.TEACHER_NO = #{teacher_no} </when>
+			<when test="user_grp_cd == 'UGP001'">  and    N.LEC_NO in (SELECT LEC_NO FROM  tb_lectureapp WHERE USE_YN = 'Y' AND STD_USER_NO = #{std_user_no}) </when>
+			<when test="user_grp_cd == 'UGP006'">  AND ( S.cust_no = #{cust_no} || S.cust_no in (select cust_no from tb_cust where up_cust_no=#{cust_no})  )  </when>
+		</choose>
+		<if test='lec_no != null and lec_no != ""'> AND L.LEC_NO = #{lec_no}  </if>
+	</select>
+
+	<select id="mngLessionVideoList" parameterType="java.util.Map" resultMap="lowerMap">
+
+		/* lesson.mngLessionVideoList (사용안함) */
+
+				select   L.LEC_NO
+			           , C.CUST_NM
+	                   , S.SBJ_NM as LEC_NM
+			           , CONCAT_WS( ','
+			                     , case when L.LEC_MON_YN = 'Y' then '월' end
+			                     , case when L.LEC_TUE_YN = 'Y' then '화' end
+			                     , case when L.LEC_WED_YN = 'Y' then '수' end
+			                     , case when L.LEC_THU_YN = 'Y' then '목' end
+			                     , case when L.LEC_FRI_YN = 'Y' then '금' end
+			                     , case when L.LEC_SAT_YN = 'Y' then '토' end
+			                     , case when L.LEC_SUN_YN = 'Y' then '일' end
+
+			             ) as LEC_WEEK_NM
+			           , L.LEC_FR_DT
+			           , L.LEC_TO_DT
+			           , L.LEC_FR_TM
+			           , L.LEC_TO_TM
+			           , L.PROG_ROUND
+			           , L.LEC_INWON
+			           , U.USER_NM as TEACHER_NM
+					   , S.SBJ_NM
+			           , ( SELECT NM from TB_CODE SC where REPR_CD ='SGC' and SC.cd = S.SBJ_GRP_CD ) as SBJ_GRP_NM
+			           , ( SELECT NM from TB_CODE SC where REPR_CD ='CTC' and SC.cd = S.CLASS_TGT_CD ) as CLASS_TGT_NM
+			           , ( SELECT NM from TB_CODE SC where REPR_CD ='PSC' and SC.cd = S.PROG_STATE_CD ) as CLASS_STATE_NM
+			           , ( SELECT NM from TB_CODE SC where REPR_CD ='SCC' and SC.cd = S.SBJ_CLS_CD ) as SBJ_CLS_NM
+
+		               , ( SELECT phy_file_nm from tb_file SF where SF.REF_PK = 'TB_LECTURE' AND SF.REF_PK = L.LEC_NO ORDER BY SF.FILE_NO DESC LIMIT 0, 1) AS MAIN_IMG
+					   , ( SELECT VIDEO_URL from tb_videodata VD where VD.LES_NO = N.LES_NO ORDER BY VD.DATA_NO DESC LIMIT 0, 1) AS VIDEO_URL
+	                  , N.LES_NO
+				      , N.LES_DT
+				      , N.LES_FR_TM
+				      , N.LES_TO_TM
+
+				from tb_lecture L left outer join tb_subject S on ( L.SBJ_NO = S.SBJ_NO )
+		                      left outer join tb_cust    C on ( S.cust_no = C.CUST_NO )
+		                      left outer join tb_user    U on ( L.TEACHER_NO = U.USER_NO )
+                              inner join TB_LESSON N on ( L.LEC_NO = N.LEC_NO )
+
+                WHERE L.USE_YN = 'Y'
+                and   S.USE_YN = 'Y'
+                and    L.PROG_STATE_CD = 'PSC001'
+                and    N.LES_DT = date_format(now(), '%Y%m%d')
+                AND    C.cust_no = #{cust_no}
+                ORDER BY L.LEC_NO desc
+
+	</select>
+
+
+	<update id="updateLectureAppUseYn" parameterType="java.util.Map">
+
+		/* lesson.updateLectureAppUseYn */
+
+		UPDATE TB_LECTUREAPP
+		SET		use_yn = 'N'
+		WHERE  lec_app_no = #{lec_app_no}
+
+	</update>
+
+
+	<select id="myLessionList" parameterType="java.util.Map" resultMap="lowerMap">
+		/* lesson.myLessionList */
+		select  S.SBJ_NM as LEC_NM
+			, U.USER_NM as STD_USER_NM
+			, U.GENDER_GBN
+			, A.ATT_NUM
+			, A.ABSENT_NUM
+			, A.REG_DT
+			, A.FEEDBACK_NUM
+			, A.LEC_APP_NO
+			, A.LEC_NO
+			, U.USER_NO
+			, U.HP_NO
+			, U.USER_ID
+			, U.GENDER_GBN
+			, LS.LES_DT
+			, LS.LES_FR_TM
+			, LS.LES_TO_TM
+			, LS.ROOM_ID
+			, S.SBJ_GRP_CD
+			, S.SBJ_CLS_CD
+			, (select PHY_FILE_NM from tb_file where REF_NM='TB_SUBJECT' and REF_PK = S.SBJ_NO limit 1) as PHY_FILE_NM
+			from tb_lectureapp A left outer join tb_user    U on ( A.STD_USER_NO = U.USER_NO )
+			left outer join tb_lecture L on ( A.LEC_NO      = L.LEC_NO )
+		left outer join tb_subject S on ( L.SBJ_NO      = S.SBJ_NO )
+		left outer join tb_lesson  LS on ( A.LEC_NO     = LS.LEC_NO )
+		where A.STD_USER_NO = #{std_user_no}
+		and A.USE_YN = 'Y'
+		and date_format(LS.LES_DT, '%Y%m%d') &gt;=  date_format(now(), '%Y%m%d')
+		order by DATEDIFF(LS.LES_DT, date_format(now(), '%Y%m%d')), LS.LES_FR_TM
+		<if test=' start_row != null '> limit  #{start_row}, #{end_row}  </if>
+	</select>
+	<select id="myLessionCount" parameterType="java.util.Map" resultType="int">
+    	SELECT  count(*)
+		from tb_lectureapp A left outer join tb_user    U on ( A.STD_USER_NO = U.USER_NO )
+			left outer join tb_lecture L on ( A.LEC_NO      = L.LEC_NO )
+		left outer join tb_subject S on ( L.SBJ_NO      = S.SBJ_NO )
+		left outer join tb_lesson  LS on ( A.LEC_NO     = LS.LEC_NO )
+		where A.STD_USER_NO = #{std_user_no}
+		and A.USE_YN = 'Y'
+		and date_format(LS.LES_DT, '%Y%m%d') &gt;=  date_format(now(), '%Y%m%d')
+	</select>
+
+	<!-- 로그인 사용자의 출석 정보 목록 조회 관련 -->
+	<sql id="myAttend-Where">
+		WHERE A.STD_USER_NO = #{std_user_no}
+		  AND date_format(B.REG_DT, '%Y%m%d') &lt;=  date_format(now(), '%Y%m%d')
+	</sql>
+
+	<select id="myAttendList" parameterType="java.util.Map" resultMap="lowerMap">
+		/* lesson.myAttendList */
+		SELECT A.STD_USER_NO, A.LES_DT, B.ATT_YN
+				,D.SBJ_NM AS LEC_NM ,C.LEC_FR_TM ,C.LEC_TO_TM
+			    ,A.VIDEO_URL
+		FROM (
+			SELECT T.*, DENSE_RANK() OVER (ORDER BY TMP_DT) DT_RANK
+			FROM (
+				SELECT LEC_APP_NO, A.LEC_NO, A.STD_USER_NO, DATE_FORMAT(N.LES_DT, '%Y%m%d') AS LES_DT, N.LES_NO,
+						CASE WHEN DATE_FORMAT(N.LES_DT, '%Y%m%d') &lt;= DATE_FORMAT(NOW(), '%Y%m%d') THEN DATE_FORMAT(NOW(), '%Y%m%d')
+						ELSE N.LES_DT
+						END TMP_DT
+					   , ( SELECT VIDEO_URL from tb_videodata VD where VD.LES_NO = N.LES_NO ORDER BY VD.DATA_NO DESC LIMIT 0, 1) AS VIDEO_URL
+				FROM TB_LECTUREAPP A INNER JOIN TB_LESSON N ON  A.LEC_NO = N.LEC_NO
+				WHERE A.STD_USER_NO = #{std_user_no}
+				ORDER BY N.LES_DT
+			) T
+		) A  LEFT OUTER JOIN TB_ATTENDANCE B ON A.LEC_APP_NO = B.LEC_APP_NO	AND  A.LES_NO = B.LES_NO
+			INNER JOIN TB_LECTURE C ON A.LEC_NO = C.LEC_NO
+			INNER JOIN TB_SUBJECT D ON C.SBJ_NO = D.SBJ_NO
+		WHERE A.DT_RANK <![CDATA[ <=  ]]> 2
+		ORDER BY A.LES_DT DESC, C.LEC_FR_TM
+	</select>
+	<select id="myAttendCount" parameterType="java.util.Map" resultType="int">
+		/* lesson.myAttendCount */
+		SELECT
+			COUNT(*)
+		FROM       TB_LECTUREAPP A
+		INNER JOIN TB_ATTENDANCE B ON A.LEC_APP_NO = B.LEC_APP_NO
+		INNER JOIN TB_LECTURE C    ON A.LEC_NO = C.LEC_NO
+		INNER JOIN TB_SUBJECT D    ON C.SBJ_NO = D.SBJ_NO
+		<include refid="myAttend-Where" />
+	</select>
+
+
+	<delete id="deleteLession" parameterType="java.util.Map">
+          DELETE FROM TB_LESSON
+          WHERE LES_DT &gt;  date_format(now(), '%Y%m%d')
+          AND LEC_NO = #{lec_no}
+
+    </delete>
+
+	<insert id="insertLession" parameterType="java.util.Map">
+        INSERT INTO TB_LESSON
+        (
+            LES_ROUND
+            , LEC_NO
+            , LES_DT
+            , LES_FR_TM
+            , LES_TO_TM
+            , TEACHER_NO
+            , ATT_NUM
+            , ABSENT_NUM
+            , ROOM_ID
+            , REG_DT
+        )
+        select ( SELECT IFNULL(MAX(LES_ROUND), 0)
+                    FROM TB_LESSON N
+                    WHERE N.LEC_NO = T1.LEC_NO
+                ) + RANK() OVER (PARTITION BY T1.LEC_NO ORDER BY T1.dt) AS LES_ROUND
+                ,T1.LEC_NO
+                ,T1.dt AS LES_DT
+                ,T1.LEC_FR_TM
+                ,T1.LEC_TO_TM
+                ,T1.TEACHER_NO
+                , 0
+                , 0
+                , UPPER(REPLACE(UUID(),'-',''))
+                , date_format(now(), '%Y%m%d%H%i%s')
+        from (
+            select tt.*
+            from
+            (
+                SELECT date_format(lec.LEC_FR_DT + interval seq day, '%Y%m%d') as dt, lec.*
+                FROM seq_0_to_365
+                     ,TB_LECTURE lec
+                WHERE LEC_NO = #{lec_no}
+                AND USE_YN = 'Y'
+            ) tt
+                where tt.dt &lt;= tt.LEC_TO_DT
+                and  (
+                case when weekday(tt.dt) = 0 and LEC_MON_YN = 'Y' then 'Y' end  = 'Y'
+                or case when weekday(tt.dt) = 1 and LEC_TUE_YN = 'Y' then 'Y' end  = 'Y'
+                or case when weekday(tt.dt) = 2 and LEC_WED_YN = 'Y' then 'Y' end  = 'Y'
+                or case when weekday(tt.dt) = 3 and LEC_THU_YN = 'Y' then 'Y' end  = 'Y'
+                or case when weekday(tt.dt) = 4 and LEC_FRI_YN = 'Y' then 'Y' end  = 'Y'
+                or case when weekday(tt.dt) = 5 and LEC_SAT_YN = 'Y' then 'Y' end  = 'Y'
+                or case when weekday(tt.dt) = 6 and LEC_SUN_YN = 'Y' then 'Y' end  = 'Y'
+            )
+            AND tt.dt not in (
+                SELECT les_dt
+                FROM TB_LESSON L
+                WHERE L.LEC_NO = tt.LEC_NO
+            )
+            and tt.dt <![CDATA[ >=  ]]>  date_format(now(), '%Y%m%d')
+        ) T1
+
+	  </insert>
+
+
+	<sql id="mainLessonScheduleWhere">
+
+		<if test='cust_no != null and cust_no != ""'>
+			 AND C.cust_no = #{cust_no}
+		</if>
+
+		<if test='fr_dt != null and fr_dt != ""'>
+			AND   N.LES_DT  <![CDATA[ >=  ]]> #{fr_dt}
+		</if>
+
+		<if test='to_dt != null and to_dt != ""'>
+			AND   N.LES_DT  <![CDATA[ <=  ]]> #{to_dt}
+		</if>
+
+		<if test='lesson_dt != null and lesson_dt != ""'>
+			AND   N.LES_DT =  #{lesson_dt}
+		</if>
+
+		<if test='teacher_no != null and teacher_no != ""'>
+			AND   L.TEACHER_NO =  #{teacher_no}
+		</if>
+
+	</sql>
+
+
+	<select id="mainLessonScheduleCntDetail" parameterType="java.util.Map" resultMap="lowerMap">
+		/* lesson.mainLessonScheduleCntDetail */
+
+
+		select   count(*) as total_cnt
+		, count(case when  concat(N.LES_DT, ifnull(N.LES_TO_TM, N.LES_FR_TM)) <![CDATA[ <  ]]> date_format(now(), '%Y%m%d%H%i%s') then 1 end ) as end_cnt
+		from tb_lecture L      inner join TB_LESSON  N on ( L.LEC_NO = N.LEC_NO )
+		left outer join tb_subject S on ( L.SBJ_NO = S.SBJ_NO )
+		left outer join tb_cust    C on ( S.cust_no = C.CUST_NO )
+		left outer join tb_user    U on ( L.TEACHER_NO = U.USER_NO )
+
+		WHERE L.USE_YN = 'Y'
+		and   S.USE_YN = 'Y'
+
+		<include refid="mainLessonScheduleWhere"/>
+
+
+	</select>
+
+	<select id="mainLessonScheduleList" parameterType="java.util.Map" resultMap="lowerMap">
+			/* lesson.mainLessonScheduleList */
+
+			select    A.hh
+					, A.mm
+					, group_concat(distinct A.LEC_NM  separator ' / ') as LEC_NM
+			from (
+					select   L.LEC_NO
+					, N.LES_DT
+					, substr(N.LES_FR_TM, 1, 2 ) as hh
+					, case when cast(substr(N.LES_FR_TM, 3 ) as integer) <![CDATA[ <  ]]> 30 then 0 else 30 end as mm
+					, S.SBJ_NM as LEC_NM
+					from tb_lecture L      inner join TB_LESSON  N on ( L.LEC_NO = N.LEC_NO )
+					left outer join tb_subject S on ( L.SBJ_NO = S.SBJ_NO )
+					left outer join tb_cust    C on ( S.cust_no = C.CUST_NO )
+					left outer join tb_user    U on ( L.TEACHER_NO = U.USER_NO )
+
+					WHERE L.USE_YN = 'Y'
+					and   S.USE_YN = 'Y'
+
+		            <include refid="mainLessonScheduleWhere"/>
+
+			) A
+			group by   A.hh , A.mm
+			order by   A.hh , A.mm
+
+	</select>
+
+
+	<select id="mainLessonAttendList" parameterType="java.util.Map" resultMap="lowerMap">
+	/* lesson.mainLessonAttendList */
+		SELECT A.*
+		FROM (
+
+				select L.LEC_NO
+					,  S.SBJ_NM as LEC_NM
+					,  max(T.USER_NM) as TEACHER_NM
+		            ,  round(ifnull(avg(case when L.LEC_INWON = 0 then 0 else N.ATT_NUM / L.LEC_INWON * 100 end), 0), 2) as INWON_RATE
+				from tb_lecture L      inner join TB_LESSON  N on ( L.LEC_NO = N.LEC_NO )
+									   left outer join tb_subject S on ( L.SBJ_NO = S.SBJ_NO )
+									   left outer join tb_cust    C on ( S.cust_no = C.CUST_NO )
+									   left outer join tb_user    T on ( N.TEACHER_NO = T.USER_NO )
+				WHERE L.USE_YN = 'Y'
+				and   S.USE_YN = 'Y'
+
+		        <include refid="mainLessonScheduleWhere"/>
+
+				group by L.LEC_NO, S.SBJ_NM
+
+		) A
+
+		<if test="sort_gbn == 'TOP'.toString()">
+		    ORDER BY A.inwon_rate desc, A.LEC_NM
+		</if>
+
+		<if test="sort_gbn == 'WORST'.toString()">
+			ORDER BY A.inwon_rate asc, A.LEC_NM
+		</if>
+
+		<if test='top_row_cnt != null and top_row_cnt != ""'>
+			limit 0, #{top_row_cnt}
+		</if>
+
+
+	</select>
+
+	<select id="mainLessonMonthList" parameterType="java.util.Map" resultMap="lowerMap">
+		/* lesson.mainLessonMonthList */
+
+		select  A.week_num
+				, A.week_nm
+				, group_concat(distinct A.LEC_NM  separator ' / ') as LEC_NM
+		from (
+				select    DAYOFWEEK(LES_DT) AS week_num
+						, CASE DAYOFWEEK(LES_DT)
+							WHEN '1' THEN '일'
+							WHEN '2' THEN '월'
+							WHEN '3' THEN '화'
+							WHEN '4' THEN '수'
+							WHEN '5' THEN '목'
+							WHEN '6' THEN '금'
+							WHEN '7' THEN '토'
+				        END AS week_nm
+				      , S.SBJ_NM as LEC_NM
+				from tb_lecture L      inner join TB_LESSON  N on ( L.LEC_NO = N.LEC_NO )
+				left outer join tb_subject S on ( L.SBJ_NO = S.SBJ_NO )
+				left outer join tb_cust    C on ( S.cust_no = C.CUST_NO )
+				left outer join tb_user    U on ( L.TEACHER_NO = U.USER_NO )
+
+				WHERE L.USE_YN = 'Y'
+				and   S.USE_YN = 'Y'
+
+				<include refid="mainLessonScheduleWhere"/>
+		) A
+		group by   A.week_num , A.week_nm
+		order by   A.week_num , A.week_nm
+
+
+	</select>
+
+
+
+	<select id="lessonScheduleTimeList" parameterType="java.util.Map" resultMap="lowerMap">
+	    /* lesson.lessonScheduleTimeList */
+
+		select   T.LEC_NO
+				, ( SELECT NM from TB_CODE SC where REPR_CD ='SGC' and SC.cd = S.SBJ_GRP_CD ) as SBJ_GRP_NM
+				, S.SBJ_NM
+				, T.LEC_FR_DT
+				, T.LEC_TO_DT
+				, R.USER_NM  as TEACHER_NM
+				, T.LEC_INWON
+				, ( SELECT NM from TB_CODE SC where REPR_CD ='PSC' and SC.cd = S.PROG_STATE_CD ) as CLASS_STATE_NM
+				, T.PROG_ROUND
+				, ifnull(T.TOT_ROUND, 0) as TOT_ROUND
+				, T.LEC_DSC
+				, ( select phy_file_nm from TB_FILE F where F.REF_NM ='TB_SUBJECT' AND  F.REF_PK = S.SBJ_NO AND F.FILE_GBN = 'main_img'  ORDER BY F.FILE_NO DESC LIMIT 0, 1 ) AS IMG_FILE_NM
+				, L.LES_FR_TM
+				, L.LES_TO_TM
+		        , L.ROOM_ID
+				, case  when concat(L.LES_DT,  L.LES_FR_TM ) <![CDATA[ > ]]> DATE_FORMAT(now()	, '%Y%m%d%H%i') then '교육 전'
+						when concat(L.LES_DT,  L.LES_FR_TM ) <![CDATA[ < ]]> DATE_FORMAT(now()	, '%Y%m%d%H%i') then '종료'
+						else '교육 중'
+				end as EDU_PROC_NM
+
+		     , CASE WHEN DATE_FORMAT(now()	, '%Y%m%d%H%i') BETWEEN CONCAT(T.LEC_FR_DT, T.LEC_FR_TM ) AND CONCAT(T.LEC_TO_DT, T.LEC_TO_TM ) THEN  '진행'
+			        WHEN CONCAT(T.LEC_TO_DT, T.LEC_TO_TM ) <![CDATA[ < ]]>  DATE_FORMAT(now()	, '%Y%m%d%H%i') THEN '종료'
+			        ELSE '진행전'
+			   END   AS ING_NM
+
+		from   TB_LECTURE T inner      join TB_LESSON  L on ( T.LEC_NO     = L.LEC_NO  )
+		left outer join TB_USER    R on ( T.TEACHER_NO = R.USER_NO )
+		left outer join tb_subject S on ( T.SBJ_NO     = S.SBJ_NO  )
+		where  T.use_yn = 'Y'
+		and    L.LES_DT     = #{lesson_dt}
+
+		<if test='teacher_no != null and teacher_no != ""'>
+			AND   L.TEACHER_NO =  #{teacher_no}
+		</if>
+
+		<if test="mm == '0'.toString()">
+			and    L.LES_FR_TM <![CDATA[ >= ]]> concat(#{hh}, '00' )
+			and    L.LES_FR_TM <![CDATA[ <  ]]> concat(#{hh}, '30' )
+		</if>
+
+		<if test="mm != '0'.toString()">
+			and    L.LES_FR_TM <![CDATA[ >= ]]> concat(#{hh}, '30' )
+			and    L.LES_FR_TM <![CDATA[ <  ]]> concat(#{hh}, '60' )
+		</if>
+
+		order by L.LES_DT,  L.LES_FR_TM
+
+	</select>
+
+	<select id="stdUserLessonInfo" parameterType="java.util.Map" resultMap="lowerMap">
+	/* lesson.stdUserLessonInfo */
+		select    L.LES_NO
+				, L.LEC_NO
+				, L.LES_ROUND
+				, L.LES_DT
+				, L.LES_FR_TM
+				, L.LES_TO_TM
+				, L.ROOM_ID
+				, S.SBJ_NM  as LEC_NM
+				, SUBSTR( _UTF8'일월화수목금토', DAYOFWEEK(L.LES_DT), 1) AS WEEK_NM
+
+				, TIMESTAMPDIFF (SECOND, now(), STR_TO_DATE( CONCAT(L.LES_DT, L.LES_FR_TM ), '%Y%m%d%H%i' )) as RMND_SECTM
+
+		from TB_LECTUREAPP A inner join tb_lecture T on ( A.LEC_NO = T.LEC_NO )
+							 inner join tb_lesson  L on ( A.LEC_NO = L.LEC_NO )
+							 inner join tb_subject S on ( T.SBJ_NO = S.SBJ_NO )
+		where A.STD_USER_NO = #{std_user_no}
+		and   A.use_yn = 'Y'
+		and   T.USE_YN = 'Y'
+		and  CONCAT(L.LES_DT, L.LES_TO_TM )	 <![CDATA[ >= ]]>  DATE_FORMAT(now()	, '%Y%m%d%H%i')
+		order by L.LES_DT, L.LES_TO_TM
+		limit 0, 1
+
+	</select>
+
+</mapper>

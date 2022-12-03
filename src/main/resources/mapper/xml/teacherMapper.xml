@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="teacher">
+
+	<!-- resultMap 소문자 변경 -->
+	<resultMap type="org.apache.commons.collections4.map.CaseInsensitiveMap" id="lowerMap"/>
+
+	<sql id="teacherWhere">
+		 
+		where U.user_grp_cd ='UGP002'
+		and   U.USE_YN = 'Y'		
+		
+		<if test='cust_nm != null and cust_nm != ""'> AND C.cust_nm like concat('%', #{cust_nm} , '%' ) </if>
+		<if test='cust_no != null and cust_no != ""'> AND C.cust_no = #{cust_no} </if>
+		<if test='user_nm != null and user_nm != ""'> AND U.user_nm like concat('%', #{user_nm} , '%' ) </if>
+		<if test='hp_no   != null and hp_no   != ""'> AND U.hp_no like   concat('%', #{hp_no} , '%' ) </if>
+		
+	</sql>
+	
+	<select id="teacherList" parameterType="java.util.Map" resultMap="lowerMap">
+	
+		/* teacher.teacherList */
+
+			select  U.*
+			      , C.cust_nm
+			      , case when ( select count('X') 
+			                    from TB_LECTURE L 
+			                    where L.TEACHER_NO = U.USER_NO 
+			                    and L.USE_YN = 'Y'  
+			                    and   DATE_FORMAT(now()	, '%Y%m%d')  between L.LEC_FR_DT and L.LEC_TO_DT
+			                  ) <![CDATA[ >  ]]> 0 then '진행중' end as PROG_NM
+
+
+				, ( select group_concat(distinct SC.SBJ_GRP_NM )
+					from TB_LECTURE L inner join TB_SUBJECT S on ( L.SBJ_NO = S.SBJ_NO )
+		                              inner join ( SELECT CD, NM as SBJ_GRP_NM
+												   FROM TB_CODE
+												   WHERE REPR_CD = 'SGC'
+					                             ) SC on ( S.SBJ_GRP_CD = SC.CD )
+					 where L.TEACHER_NO = U.USER_NO
+					 and L.USE_YN = 'Y'
+
+			   	) as SBJ_GRP_NM
+
+			from tb_user U left outer join  tb_cust  C on ( U.cust_no = C.CUST_NO )
+		
+		    <include refid="teacherWhere" />
+
+			order by U.USER_NO desc
+		
+		    <if test=' start_row != null '> limit  #{start_row}, #{end_row}  </if>	
+		
+	</select>
+	 
+
+	<select id="teacherCount" parameterType="java.util.Map" resultType="int">
+	
+		/* teacher.teacherCount */
+		
+		    SELECT  count(*) 
+			from tb_user U left outer join  tb_cust  C on ( U.cust_no = C.CUST_NO )
+		 
+		    <include refid="teacherWhere" /> 
+		
+	</select>
+ 
+
+
+    <select id="tearcherDetail"  parameterType="java.lang.String" resultMap="lowerMap">
+      
+         /* teacher.tearcherDetail */
+
+			select  U.*
+			      , ( SELECT NM from TB_CODE SC where REPR_CD ='SGC' and SC.cd = U.SBJ_GRP_CD ) as SBJ_GRP_NM
+			      , C.cust_nm 
+			      , case when ( select count('X') 
+			                    from TB_LECTURE L 
+			                    where L.TEACHER_NO = U.USER_NO 
+			                    and L.USE_YN = 'Y'  
+			                    and   DATE_FORMAT(now()	, '%Y%m%d')  between L.LEC_FR_DT and L.LEC_TO_DT
+			                  ) <![CDATA[ >  ]]>  0 then '진행중' end as PROG_NM
+			      ,  ( select phy_file_nm  from tb_file SF where SF.ref_nm = 'TB_USER' and SF.ref_pk = #{user_no} order by file_no desc limit 0, 1 ) as file_nm              
+			from tb_user U left outer join  tb_cust  C on ( U.cust_no = C.CUST_NO )
+		    where  user_no = #{user_no}
+ 
+    </select> 
+
+
+	<update id="updateteacherUseYn" parameterType="java.util.Map">
+	 
+		/* teacher.updateteacherUseYn */
+		
+		UPDATE tb_user
+		SET		use_yn = 'N'
+		 where  user_no = #{user_no}
+		
+	</update>    
+
+
+
+    <select id="tearcherLessionList"  parameterType="java.lang.String" resultMap="lowerMap">
+      
+         /* teacher.tearcherLessionList */
+
+			select   L.LES_NO
+			       , S.SBJ_NM as LEC_NM
+			       , L.LES_DT
+			       , L.LES_FR_TM
+			       , L.LES_TO_TM
+			from TB_LESSON L left outer join TB_LECTURE R on ( L.LEC_NO = R.LEC_NO AND R.USE_YN = 'Y' )
+			                 left outer join TB_SUBJECT S on ( R.SBJ_NO = S.SBJ_NO )
+			where L.TEACHER_NO = #{user_no}
+			order by L.LES_DT desc, L.LES_FR_TM desc
+ 
+    </select>
+
+
+
+	<select id="teacherMainLessonList" parameterType="java.util.Map" resultMap="lowerMap">
+		/* teacher.teacherMainLessonList */
+		select    R.ING_NUM
+				, L.LEC_NO
+				, L.LES_NO
+				, L.LES_ROUND
+				, L.LES_DT
+				, L.LES_FR_TM
+				, L.LES_TO_TM
+				, L.LES_DSC
+		        , L.ROOM_ID
+				, S.SBJ_NM AS LEC_NM
+				, T.LEC_DSC
+				, T.LEC_INWON
+
+				, SUBSTR( _UTF8'일월화수목금토', DAYOFWEEK(L.LES_DT), 1) AS WEEK_NM
+				, S.SBJ_NM
+				, CASE   WHEN DATE_FORMAT(now()	, '%Y%m%d%H%i') BETWEEN CONCAT(L.LES_DT, L.LES_FR_TM ) AND CONCAT(L.LES_DT, L.LES_TO_TM ) THEN  '진행'
+						WHEN CONCAT(L.LES_DT, L.LES_TO_TM )	 <![CDATA[ < ]]>   DATE_FORMAT(now()	, '%Y%m%d%H%i') THEN '종료'
+						ELSE '진행전'
+				  END   AS ING_NM
+		       , ( select phy_file_nm from TB_FILE F where F.REF_NM ='TB_SUBJECT' AND  F.REF_PK = S.SBJ_NO AND F.FILE_GBN = 'main_img'  ORDER BY F.FILE_NO DESC LIMIT 0, 1 ) AS MAIN_IMG
+		from TB_LESSON L    inner join tb_lecture T on ( L.LEC_NO = T.LEC_NO )
+							inner join tb_subject S on ( T.SBJ_NO = S.SBJ_NO )
+							inner join tb_cust    C on ( C.cust_no = S.CUST_NO )
+							inner join tb_user    U on ( L.TEACHER_NO = U.USER_NO )
+							inner join (
+											select   ING_NUM
+											, substring((case when ING_NUM = 1 then  max(CONCAT(L.LES_DT, L.LES_TO_TM, L.les_no ) )
+													when ING_NUM = 0 then  max(CONCAT(L.LES_DT, L.LES_TO_TM, L.les_no ) )
+													when ING_NUM = 2 then  min(CONCAT(L.LES_DT, L.LES_FR_TM, L.les_no ) )
+													end
+											) , 13)as les_no
+											from (
+													select   L.*
+													, CASE WHEN DATE_FORMAT(now()	, '%Y%m%d%H%i') BETWEEN CONCAT(L.LES_DT, L.LES_FR_TM ) AND CONCAT(L.LES_DT, L.LES_TO_TM ) THEN  1
+													WHEN CONCAT(L.LES_DT, L.LES_TO_TM )	 <![CDATA[ < ]]>   DATE_FORMAT(now()	, '%Y%m%d%H%i') THEN 0
+													ELSE 2
+													END   AS ING_NUM
+													from TB_LESSON L  inner join tb_lecture T on ( L.LEC_NO = T.LEC_NO )
+													where T.use_yn = 'Y'
+													and   L.TEACHER_NO = #{teacher_no}
+											) L
+											group by ING_NUM
+		) R on (L.les_no = R.les_no )
+		order by R.ing_num
+
+	</select>
+
+ 
+
+
+</mapper>
